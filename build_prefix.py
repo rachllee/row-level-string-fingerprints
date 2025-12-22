@@ -13,13 +13,13 @@ PREFIX_BYTES = 8
 
 SAMPLE_SIZE = 500_000
 SEED = 42
-def dump_boundaries_txt(boundaries, path="q8_prefix_boundaries.txt"):
+def dump_boundaries_txt(boundaries, path="prefix_boundaries.txt"):
     with open(path, "w") as f:
         f.write("bucket_id,boundary_u64\n")
         for i, b in enumerate(boundaries):
             f.write(f"{i},{int(b)}\n")
 
-def dump_bucket_stats(df, col="q8_prefix", path="q8_prefix_bucket_stats.csv"):
+def dump_bucket_stats(df, col="q8_prefix", path="prefix_bucket_stats.csv"):
     stats = (
         df[col]
         .value_counts()
@@ -103,7 +103,7 @@ def main():
 
     # ---- Human-readable dumps ----
 
-    dump_bucket_stats(df)
+    dump_bucket_stats(df, col="q8_prefix")
     print("Wrote q8_prefix_bucket_stats.csv")
 
     dump_samples(df)
