@@ -1,10 +1,10 @@
 #!/bin/bash
 
-
-rm -rf prefix_bucket_stats.csv
-rm -rf q8_prefix_boundaries.npy
-rm -rf title_prefix_samples.csv
-rm -rf title_strs_prefix.parquet
-rm -rf q8_prefix_boundaries_readable.txt
+rm -f q*_prefix_boundaries.npy
+rm -f q*_prefix_boundaries.txt
+rm -f q*_prefix_boundaries_readable.txt
+rm -f q*_prefix_bucket_stats.csv
+rm -f title_prefix_samples_b*.csv
+rm -f title_strs_prefix_b*.parquet
 
 echo "removed files"
