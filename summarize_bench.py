@@ -136,6 +136,7 @@ def main():
     parser.add_argument("--csv", required=True, help="Input CSV from bench_prefix.py")
     parser.add_argument("--out-table", default="bench_summary.csv", help="Output summary table CSV")
     parser.add_argument("--out-dir", default="bench_plots", help="Output directory for plots")
+    parser.add_argument("--plots", action="store_true", help="Generate plots in out-dir.")
     args = parser.parse_args()
 
     df = pd.read_csv(args.csv)
@@ -154,15 +155,25 @@ def main():
         summaries.append(summarize_group(g))
 
     summary_df = pd.DataFrame(summaries).sort_values(["bits", "source", "prefix"])
-    summary_df.to_csv(args.out_table, index=False, quoting=csv.QUOTE_MINIMAL)
 
-    os.makedirs(args.out_dir, exist_ok=True)
-    plot_times(summary_df, args.out_dir)
-    plot_speedup(summary_df, args.out_dir)
-    plot_speedup_box(df, args.out_dir)
+    write_header = not os.path.exists(args.out_table)
+    summary_df.to_csv(
+        args.out_table,
+        mode="a",
+        index=False,
+        header=write_header,
+        quoting=csv.QUOTE_MINIMAL,
+    )
+
+    if args.plots:
+        os.makedirs(args.out_dir, exist_ok=True)
+        plot_times(summary_df, args.out_dir)
+        plot_speedup(summary_df, args.out_dir)
+        plot_speedup_box(df, args.out_dir)
 
     print(f"Wrote table: {args.out_table}")
-    print(f"Wrote plots to: {args.out_dir}")
+    if args.plots:
+        print(f"Wrote plots to: {args.out_dir}")
 
 
 if __name__ == "__main__":
