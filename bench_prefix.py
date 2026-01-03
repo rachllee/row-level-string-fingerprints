@@ -74,6 +74,8 @@ def main():
         t_full, _ = time_query(con, q_full)
         t_fp, _ = time_query(con, q_fp)
 
+        t_full, times_full = time_query(con, q_full)
+        t_fp, _ = time_query(con, q_fp)
         print(f"\n{p}%  buckets[{lo},{hi}]")
         print(f"  full scan: {t_full*1000:.2f} ms")
         print(f"  fp+exact:  {t_fp*1000:.2f} ms   speedup {t_full/t_fp:.2f}x")
