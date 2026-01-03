@@ -63,6 +63,37 @@ def plot_by_query(df, out_dir, y_col, y_label, y_err_col=None):
         plt.close(fig)
 
 
+def plot_time_by_query(df, out_dir):
+    bits = np.sort(df["bits"].unique())
+    sources = sorted(df["source"].unique())
+    prefixes = sorted(df["prefix"].unique())
+
+    for prefix in prefixes:
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+        for source in sources:
+            sub = df[(df["prefix"] == prefix) & (df["source"] == source)]
+            if sub.empty:
+                continue
+            sub = sub.sort_values("bits")
+            x = sub["bits"].to_numpy()
+            full = sub["time_full_ms"].to_numpy()
+            fp = sub["time_fp_ms"].to_numpy()
+            ax.plot(x, full, marker="o", linewidth=1.5, label=f"{source} full")
+            ax.plot(x, fp, marker="o", linewidth=1.5, label=f"{source} fp+exact")
+
+        ax.set_xticks(bits)
+        ax.set_xlabel("Bits")
+        ax.set_ylabel("Median time (ms)")
+        ax.set_title(f"{prefix}%")
+        ax.grid(True, axis="y", alpha=0.3)
+        ax.legend()
+        fig.tight_layout()
+
+        out_path = os.path.join(out_dir, f"{sanitize(prefix)}_time_ms.png")
+        fig.savefig(out_path, dpi=150)
+        plt.close(fig)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--csv", default="bench_summary.csv", help="Input summary CSV")
@@ -98,6 +129,7 @@ def main():
         y_label="Speedup (median full / median fp)",
         y_err_col="speedup_iqr",
     )
+    plot_time_by_query(df, args.out_dir)
 
     print(f"Wrote table PNG: {os.path.join(args.out_dir, args.table_png)}")
     print(f"Wrote plots to: {args.out_dir}")
