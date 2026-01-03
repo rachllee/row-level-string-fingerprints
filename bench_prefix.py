@@ -55,7 +55,7 @@ def geomean(values):
     return float(np.exp(np.mean(np.log(vals))))
 
 
-def run_benchmark(con, parquet, boundaries, code_col, prefixes, warmup, reps, csv_rows, source_label, bits):
+def run_benchmark(con, parquet, boundaries, code_col, prefixes, warmup, reps, csv_rows, source_label, bits, explain):
     con.execute("DROP VIEW IF EXISTS t")
     con.execute("DROP TABLE IF EXISTS t")
     if source_label == "table":
@@ -74,6 +74,14 @@ def run_benchmark(con, parquet, boundaries, code_col, prefixes, warmup, reps, cs
             f"SELECT COUNT(*) FROM t WHERE {code_col} BETWEEN {lo} AND {hi} "
             f"AND title LIKE '{p}%'"
         )
+
+        if explain:
+            print(f"\n[{source_label}] EXPLAIN ANALYZE {p}% full scan:")
+            plan_full = con.execute("EXPLAIN ANALYZE " + q_full).fetchall()
+            print(plan_full)
+            print(f"\n[{source_label}] EXPLAIN ANALYZE {p}% fp+exact:")
+            plan_fp = con.execute("EXPLAIN ANALYZE " + q_fp).fetchall()
+            print(plan_fp)
 
         full_times = time_query(con, q_full, warmup=warmup, reps=reps)
         fp_times = time_query(con, q_fp, warmup=warmup, reps=reps)
@@ -123,6 +131,7 @@ def main():
     parser.add_argument("--warmup", type=int, default=1, help="Warmup runs to discard per query.")
     parser.add_argument("--reps", type=int, default=10, help="Timed runs per query after warmup.")
     parser.add_argument("--csv", type=str, default="", help="Optional CSV path for per-run timings.")
+    parser.add_argument("--explain", action="store_true", help="Print EXPLAIN ANALYZE for each query.")
     args = parser.parse_args()
 
     K = args.bits
@@ -156,6 +165,7 @@ def main():
         csv_rows=csv_rows,
         source_label="view",
         bits=K,
+        explain=args.explain,
     )
     run_benchmark(
         con,
@@ -168,6 +178,7 @@ def main():
         csv_rows=csv_rows,
         source_label="table",
         bits=K,
+        explain=args.explain,
     )
 
     if args.csv and csv_rows is not None:
