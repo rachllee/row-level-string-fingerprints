@@ -1,5 +1,9 @@
 import argparse
 import csv
+import json
+import os
+import shutil
+import subprocess
 import duckdb
 import numpy as np
 import time
@@ -80,6 +84,11 @@ def run_benchmark(
     bits,
     explain,
     suffix,
+    mode,
+    profile_dir,
+    profile_rows,
+    profile_shell,
+    duckdb_bin,
 ):
     con.execute("DROP VIEW IF EXISTS t")
     con.execute("DROP TABLE IF EXISTS t")
@@ -144,6 +153,26 @@ def run_benchmark(
         )
         print(f"  speedup (med/med): {speedup:.2f}x")
 
+        if profile_dir and profile_rows is not None:
+            label = f"{like_left}{q}{like_right}".replace("%", "pct")
+            base = f"{mode}_b{bits}_{source_label}_{label}"
+            full_path = os.path.join(profile_dir, f"{base}_full.json")
+            fp_path = os.path.join(profile_dir, f"{base}_fp.json")
+
+            if profile_shell:
+                rows_full = run_profile_shell(
+                    duckdb_bin, parquet, source_label, q_full, full_path
+                )
+                rows_fp = run_profile_shell(
+                    duckdb_bin, parquet, source_label, q_fp, fp_path
+                )
+            else:
+                rows_full = None
+                rows_fp = None
+
+            profile_rows.append((bits, mode, source_label, q, "full", rows_full, full_path))
+            profile_rows.append((bits, mode, source_label, q, "fp_exact", rows_fp, fp_path))
+
     if all_full and all_fp:
         full_mean = float(np.mean(all_full))
         fp_mean = float(np.mean(all_fp))
@@ -161,6 +190,23 @@ def main(argv=None, default_suffix=False):
     parser.add_argument("--reps", type=int, default=10, help="Timed runs per query after warmup.")
     parser.add_argument("--csv", type=str, default="", help="Optional CSV path for per-run timings.")
     parser.add_argument("--explain", action="store_true", help="Print EXPLAIN ANALYZE for each query.")
+    parser.add_argument(
+        "--profile-dir",
+        type=str,
+        default="",
+        help="Write JSON query profiles (and a summary CSV) to this directory.",
+    )
+    parser.add_argument(
+        "--profile-shell",
+        action="store_true",
+        help="Use the duckdb shell to generate per-query JSON profiles.",
+    )
+    parser.add_argument(
+        "--duckdb-bin",
+        type=str,
+        default="duckdb",
+        help="Path to duckdb CLI (used with --profile-shell).",
+    )
     parser.add_argument(
         "--suffix",
         action="store_true",
@@ -185,12 +231,14 @@ def main(argv=None, default_suffix=False):
     con.execute("PRAGMA threads=4")
     con.execute("PRAGMA enable_object_cache=true")
 
+    queries = ["jos", "2012", "the", "a", "(", "#", "interest"]
     if args.suffix:
-        queries = ["son", "2012", "the", "a", ")", "#"]
-    else:
-        queries = ["jos", "2012", "the", "a", "(", "#"]
+        queries = [q[::-1] for q in queries]
 
     csv_rows = [] if args.csv else None
+    profile_rows = [] if args.profile_dir else None
+    if args.profile_dir:
+        os.makedirs(args.profile_dir, exist_ok=True)
 
     run_benchmark(
         con,
@@ -205,6 +253,11 @@ def main(argv=None, default_suffix=False):
         bits=K,
         explain=args.explain,
         suffix=args.suffix,
+        mode=mode,
+        profile_dir=args.profile_dir,
+        profile_rows=profile_rows,
+        profile_shell=args.profile_shell,
+        duckdb_bin=args.duckdb_bin,
     )
     run_benchmark(
         con,
@@ -219,6 +272,11 @@ def main(argv=None, default_suffix=False):
         bits=K,
         explain=args.explain,
         suffix=args.suffix,
+        mode=mode,
+        profile_dir=args.profile_dir,
+        profile_rows=profile_rows,
+        profile_shell=args.profile_shell,
+        duckdb_bin=args.duckdb_bin,
     )
 
     if args.csv and csv_rows is not None:
@@ -227,6 +285,64 @@ def main(argv=None, default_suffix=False):
             w.writerow(["bits", "source", "prefix", "query", "run", "time_s"])
             w.writerows(csv_rows)
         print(f"\nWrote per-run timings to {args.csv}")
+
+    if args.profile_dir and profile_rows is not None:
+        summary_path = os.path.join(args.profile_dir, "profile_rows.csv")
+        with open(summary_path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["bits", "mode", "source", "query", "variant", "rows_scanned", "profile_path"])
+            w.writerows(profile_rows)
+        print(f"Wrote profile summary to {summary_path}")
+
+
+def sql_quote(s: str) -> str:
+    return s.replace("'", "''")
+
+
+def run_profile_shell(duckdb_bin, parquet, source_label, sql, out_path):
+    if not duckdb_bin:
+        return None
+    if not shutil.which(duckdb_bin):
+        return None
+
+    quoted_path = sql_quote(out_path)
+    quoted_parquet = sql_quote(parquet)
+    create_stmt = (
+        f"CREATE TABLE t AS SELECT * FROM read_parquet('{quoted_parquet}')"
+        if source_label == "table"
+        else f"CREATE VIEW t AS SELECT * FROM read_parquet('{quoted_parquet}')"
+    )
+
+    sql_script = "\n".join(
+        [
+            "PRAGMA enable_profiling='json';",
+            f"PRAGMA profiling_output='{quoted_path}';",
+            "DROP VIEW IF EXISTS t;",
+            "DROP TABLE IF EXISTS t;",
+            f"{create_stmt};",
+            f"{sql};",
+        ]
+    )
+
+    try:
+        subprocess.run(
+            [duckdb_bin, "-c", sql_script],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except subprocess.CalledProcessError:
+        return None
+
+    if not os.path.exists(out_path):
+        return None
+
+    try:
+        with open(out_path, "r") as f:
+            data = json.load(f)
+        return data.get("cumulative_rows_scanned")
+    except Exception:
+        return None
 
 
 if __name__ == "__main__":

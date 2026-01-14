@@ -69,10 +69,10 @@ def assign_codes(all_keys: np.ndarray, boundaries: np.ndarray, bits: int) -> np.
     idx = np.searchsorted(boundaries, all_keys, side="right") - 1
     idx = np.clip(idx, 0, len(boundaries) - 1)
 
-    if bits <= 8:
-        return idx.astype(np.uint8)
-    else:
-        return idx.astype(np.uint16)
+    # if bits <= 8:
+    #     return idx.astype(np.uint8)
+    # else:
+    return idx.astype(np.uint16)
 
 
 def main(argv=None, default_suffix=False):

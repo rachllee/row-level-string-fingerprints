@@ -58,6 +58,9 @@ python bench.py --bits 8 --suffix
 - `--csv` (string, default empty): write per-run timings to a CSV file.
 - `--explain`: print `EXPLAIN ANALYZE` for each query.
 - `--suffix`: benchmark suffix queries instead of prefix queries.
+- `--profile-dir` (string, default empty): write JSON query profiles (and a summary CSV) to this directory.
+- `--profile-shell`: use the duckdb shell to generate per-query JSON profiles.
+- `--duckdb-bin` (string, default `duckdb`): path to duckdb CLI (used with `--profile-shell`).
 
 ### summarize_bench.py
 - `--csv` (string, required): input CSV from `bench.py`.
@@ -69,3 +72,9 @@ python bench.py --bits 8 --suffix
 - `--csv` (string, default `bench_summary.csv`): input summary table.
 - `--out-dir` (string, default `bench_summary_plots`): output directory for plots.
 - `--table-png` (string, default `bench_summary_table.png`): output PNG table name.
+
+### segment_pruning_sim.py
+- `--bits` (int, default 8): bit width `b` (1..16).
+- `--suffix`: analyze suffix fingerprints.
+- `--queries` (string, default empty): comma-separated queries (without `%`).
+- `--csv` (string, default empty): append results to a CSV file.

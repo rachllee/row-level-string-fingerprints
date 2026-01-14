@@ -62,11 +62,9 @@ def main():
     boundaries = np.load(boundaries_npy)
     n = len(df)
 
+    queries = ["jos", "2012", "the", "a", "(", "#", "interest"]
     if args.suffix:
-        queries = ["son", "2012", "the", "a", ")", "#"]
-    else:
-        queries = ["jos", "2012", "the", "a", "(", "#"]
-
+        queries = [q[::-1] for q in queries]
     print(f"N={n:,}")
     for q in queries:
         lo, hi = bucket_range(q, boundaries, suffix=args.suffix)
