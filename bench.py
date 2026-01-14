@@ -34,10 +34,15 @@ def next_prefix_normed(s_norm: str) -> str:
     return bytes(b).decode("utf-8", errors="ignore")
 
 
-def bucket_range(query: str, boundaries: np.ndarray, suffix: bool):
+def bucket_range(query: str, boundaries: np.ndarray, bits: int, suffix: bool):
     s = normalize_query(query, suffix)
     lo = key_u64_from_normed(s)
     hi = key_u64_from_normed(next_prefix_normed(s))
+    if boundaries is None:
+        shift = 64 - bits
+        jlo = int(np.right_shift(lo, shift))
+        jhi = int(np.right_shift(hi, shift))
+        return min(jlo, jhi), max(jlo, jhi)
     jlo = np.searchsorted(boundaries, lo, side="right") - 1
     jhi = np.searchsorted(boundaries, hi, side="right") - 1
     jlo = int(np.clip(jlo, 0, len(boundaries) - 1))
@@ -89,10 +94,13 @@ def run_benchmark(
     profile_rows,
     profile_shell,
     duckdb_bin,
+    force_uncompressed_table,
 ):
     con.execute("DROP VIEW IF EXISTS t")
     con.execute("DROP TABLE IF EXISTS t")
     if source_label == "table":
+        if force_uncompressed_table:
+            con.execute("PRAGMA force_compression='uncompressed'")
         con.execute(f"CREATE TABLE t AS SELECT * FROM read_parquet('{parquet}')")
     else:
         con.execute(f"CREATE VIEW t AS SELECT * FROM read_parquet('{parquet}')")
@@ -105,7 +113,7 @@ def run_benchmark(
     like_right = "" if suffix else "%"
 
     for q in queries:
-        lo, hi = bucket_range(q, boundaries, suffix=suffix)
+        lo, hi = bucket_range(q, boundaries, bits, suffix=suffix)
         q_full = f"SELECT COUNT(*) FROM t WHERE title LIKE '{like_left}{q}{like_right}'"
         q_fp = (
             f"SELECT COUNT(*) FROM t WHERE {code_col} BETWEEN {lo} AND {hi} "
@@ -161,10 +169,20 @@ def run_benchmark(
 
             if profile_shell:
                 rows_full = run_profile_shell(
-                    duckdb_bin, parquet, source_label, q_full, full_path
+                    duckdb_bin,
+                    parquet,
+                    source_label,
+                    q_full,
+                    full_path,
+                    force_uncompressed_table,
                 )
                 rows_fp = run_profile_shell(
-                    duckdb_bin, parquet, source_label, q_fp, fp_path
+                    duckdb_bin,
+                    parquet,
+                    source_label,
+                    q_fp,
+                    fp_path,
+                    force_uncompressed_table,
                 )
             else:
                 rows_full = None
@@ -185,7 +203,7 @@ def run_benchmark(
 
 def main(argv=None, default_suffix=False):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--bits", type=int, default=8, help="Bit width b (1..16). Default: 8")
+    parser.add_argument("--bits", type=int, default=8, help="Bit width b (1..28). Default: 8")
     parser.add_argument("--warmup", type=int, default=1, help="Warmup runs to discard per query.")
     parser.add_argument("--reps", type=int, default=10, help="Timed runs per query after warmup.")
     parser.add_argument("--csv", type=str, default="", help="Optional CSV path for per-run timings.")
@@ -213,18 +231,31 @@ def main(argv=None, default_suffix=False):
         default=default_suffix,
         help="Benchmark suffix queries instead of prefix queries.",
     )
+    parser.add_argument(
+        "--parquet-path",
+        type=str,
+        default="",
+        help="Override parquet path. Supports {bits} and {mode} format tokens.",
+    )
+    parser.add_argument(
+        "--force-uncompressed-table",
+        action="store_true",
+        help="Force uncompressed storage for CTAS tables (disables FSST-style compression).",
+    )
     args = parser.parse_args(argv)
 
     K = args.bits
-    if K < 1 or K > 16:
-        raise ValueError("--bits must be between 1 and 16")
+    if K < 1 or K > 28:
+        raise ValueError("--bits must be between 1 and 28")
 
     mode = "suffix" if args.suffix else "prefix"
     parquet = f"title_strs_{mode}_b{K}.parquet"
+    if args.parquet_path:
+        parquet = args.parquet_path.format(bits=K, mode=mode)
     boundaries_npy = f"q{K}_{mode}_boundaries.npy"
     code_col = f"q{K}_{mode}"
 
-    boundaries = np.load(boundaries_npy)
+    boundaries = np.load(boundaries_npy) if os.path.exists(boundaries_npy) else None
 
     con = duckdb.connect()
 
@@ -258,6 +289,7 @@ def main(argv=None, default_suffix=False):
         profile_rows=profile_rows,
         profile_shell=args.profile_shell,
         duckdb_bin=args.duckdb_bin,
+        force_uncompressed_table=args.force_uncompressed_table,
     )
     run_benchmark(
         con,
@@ -277,6 +309,7 @@ def main(argv=None, default_suffix=False):
         profile_rows=profile_rows,
         profile_shell=args.profile_shell,
         duckdb_bin=args.duckdb_bin,
+        force_uncompressed_table=args.force_uncompressed_table,
     )
 
     if args.csv and csv_rows is not None:
@@ -299,7 +332,9 @@ def sql_quote(s: str) -> str:
     return s.replace("'", "''")
 
 
-def run_profile_shell(duckdb_bin, parquet, source_label, sql, out_path):
+def run_profile_shell(
+    duckdb_bin, parquet, source_label, sql, out_path, force_uncompressed_table
+):
     if not duckdb_bin:
         return None
     if not shutil.which(duckdb_bin):
@@ -307,11 +342,16 @@ def run_profile_shell(duckdb_bin, parquet, source_label, sql, out_path):
 
     quoted_path = sql_quote(out_path)
     quoted_parquet = sql_quote(parquet)
-    create_stmt = (
-        f"CREATE TABLE t AS SELECT * FROM read_parquet('{quoted_parquet}')"
-        if source_label == "table"
-        else f"CREATE VIEW t AS SELECT * FROM read_parquet('{quoted_parquet}')"
-    )
+    if source_label == "table":
+        if force_uncompressed_table:
+            create_stmt = (
+                "PRAGMA force_compression='uncompressed';\n"
+                f"CREATE TABLE t AS SELECT * FROM read_parquet('{quoted_parquet}')"
+            )
+        else:
+            create_stmt = f"CREATE TABLE t AS SELECT * FROM read_parquet('{quoted_parquet}')"
+    else:
+        create_stmt = f"CREATE VIEW t AS SELECT * FROM read_parquet('{quoted_parquet}')"
 
     sql_script = "\n".join(
         [

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-BITS=(1 2 4 8 10 12 14 16)
+BITS=(1 2 4 8 12 16 20 24 28)
 
 mkdir -p csvs
 

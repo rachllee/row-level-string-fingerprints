@@ -1,4 +1,5 @@
 import argparse
+import os
 import numpy as np
 import pandas as pd
 
@@ -28,10 +29,15 @@ def next_prefix_normed(s_norm: str) -> str:
     return bytes(b).decode("utf-8", errors="ignore")
 
 
-def bucket_range(query: str, boundaries: np.ndarray, suffix: bool):
+def bucket_range(query: str, boundaries: np.ndarray, bits: int, suffix: bool):
     s = normalize_query(query, suffix)
     lo = key_u64_from_normed(s)
     hi = key_u64_from_normed(next_prefix_normed(s))
+    if boundaries is None:
+        shift = 64 - bits
+        jlo = int(np.right_shift(lo, shift))
+        jhi = int(np.right_shift(hi, shift))
+        return min(jlo, jhi), max(jlo, jhi)
     jlo = np.searchsorted(boundaries, lo, side="right") - 1
     jhi = np.searchsorted(boundaries, hi, side="right") - 1
     jlo = int(np.clip(jlo, 0, len(boundaries) - 1))
@@ -45,13 +51,13 @@ def kept_fraction(df, code_col, lo, hi):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--bits", type=int, default=8, help="Bit width b (1..16). Default: 8")
+    parser.add_argument("--bits", type=int, default=8, help="Bit width b (1..28). Default: 8")
     parser.add_argument("--suffix", action="store_true", help="Estimate pruning for suffix queries.")
     args = parser.parse_args()
 
     K = args.bits
-    if K < 1 or K > 16:
-        raise ValueError("--bits must be between 1 and 16")
+    if K < 1 or K > 28:
+        raise ValueError("--bits must be between 1 and 28")
 
     mode = "suffix" if args.suffix else "prefix"
     parquet = f"title_strs_{mode}_b{K}.parquet"
@@ -59,7 +65,7 @@ def main():
     code_col = f"q{K}_{mode}"
 
     df = pd.read_parquet(parquet, columns=["title", code_col])
-    boundaries = np.load(boundaries_npy)
+    boundaries = np.load(boundaries_npy) if os.path.exists(boundaries_npy) else None
     n = len(df)
 
     queries = ["jos", "2012", "the", "a", "(", "#", "interest"]
@@ -67,7 +73,7 @@ def main():
         queries = [q[::-1] for q in queries]
     print(f"N={n:,}")
     for q in queries:
-        lo, hi = bucket_range(q, boundaries, suffix=args.suffix)
+        lo, hi = bucket_range(q, boundaries, K, suffix=args.suffix)
         kept = kept_fraction(df, code_col, lo, hi)
         label = f"%{q}" if args.suffix else f"{q}%"
         print(

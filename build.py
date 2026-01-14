@@ -69,15 +69,18 @@ def assign_codes(all_keys: np.ndarray, boundaries: np.ndarray, bits: int) -> np.
     idx = np.searchsorted(boundaries, all_keys, side="right") - 1
     idx = np.clip(idx, 0, len(boundaries) - 1)
 
-    # if bits <= 8:
-    #     return idx.astype(np.uint8)
-    # else:
-    return idx.astype(np.uint16)
+    if bits <= 8:
+        return idx.astype(np.uint8)
+    if bits <= 16:
+        return idx.astype(np.uint16)
+    if bits <= 32:
+        return idx.astype(np.uint32)
+    return idx.astype(np.uint64)
 
 
 def main(argv=None, default_suffix=False):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--bits", type=int, default=8, help="Bit width b (1..16). Default: 8")
+    parser.add_argument("--bits", type=int, default=8, help="Bit width b (1..28). Default: 8")
     parser.add_argument(
         "--suffix",
         action="store_true",
@@ -87,8 +90,8 @@ def main(argv=None, default_suffix=False):
     args = parser.parse_args(argv)
 
     K = args.bits
-    if K < 1 or K > 16:
-        raise ValueError("--bits must be between 1 and 16")
+    if K < 1 or K > 28:
+        raise ValueError("--bits must be between 1 and 28")
 
     B = 1 << K
     mode = "suffix" if args.suffix else "prefix"

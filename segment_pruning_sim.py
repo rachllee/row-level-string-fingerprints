@@ -32,10 +32,15 @@ def next_prefix_normed(s_norm: str) -> str:
     return bytes(b).decode("utf-8", errors="ignore")
 
 
-def bucket_range(query: str, boundaries: np.ndarray, suffix: bool):
+def bucket_range(query: str, boundaries: np.ndarray, bits: int, suffix: bool):
     s = normalize_query(query, suffix)
     lo = key_u64_from_normed(s)
     hi = key_u64_from_normed(next_prefix_normed(s))
+    if boundaries is None:
+        shift = 64 - bits
+        jlo = int(np.right_shift(lo, shift))
+        jhi = int(np.right_shift(hi, shift))
+        return min(jlo, jhi), max(jlo, jhi)
     jlo = np.searchsorted(boundaries, lo, side="right") - 1
     jhi = np.searchsorted(boundaries, hi, side="right") - 1
     jlo = int(np.clip(jlo, 0, len(boundaries) - 1))
@@ -120,22 +125,22 @@ def summarize_row_groups(df, lo, hi):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--bits", type=int, default=8, help="Bit width b (1..16). Default: 8")
+    parser.add_argument("--bits", type=int, default=8, help="Bit width b (1..28). Default: 8")
     parser.add_argument("--suffix", action="store_true", help="Use suffix fingerprints.")
     parser.add_argument("--queries", type=str, default="", help="Comma-separated queries (without %).")
     parser.add_argument("--csv", type=str, default="", help="Optional CSV output path.")
     args = parser.parse_args()
 
     K = args.bits
-    if K < 1 or K > 16:
-        raise ValueError("--bits must be between 1 and 16")
+    if K < 1 or K > 28:
+        raise ValueError("--bits must be between 1 and 28")
 
     mode = "suffix" if args.suffix else "prefix"
     parquet = f"title_strs_{mode}_b{K}.parquet"
     boundaries_npy = f"q{K}_{mode}_boundaries.npy"
     code_col = f"q{K}_{mode}"
 
-    boundaries = np.load(boundaries_npy)
+    boundaries = np.load(boundaries_npy) if os.path.exists(boundaries_npy) else None
 
     if args.queries:
         queries = [q.strip() for q in args.queries.split(",") if q.strip()]
@@ -148,7 +153,7 @@ def main():
 
     rows = []
     for q in queries:
-        lo, hi = bucket_range(q, boundaries, suffix=args.suffix)
+        lo, hi = bucket_range(q, boundaries, K, suffix=args.suffix)
         seg = summarize_pruning(df, lo, hi)
         rg = summarize_row_groups(df, lo, hi)
         rows.append(

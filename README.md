@@ -40,7 +40,7 @@ python bench.py --bits 8 --suffix
 ## Script arguments
 
 ### build.py
-- `--bits` (int, default 8): bit width `b` (1..16). Controls bucket count `2^b` and output names.
+- `--bits` (int, default 8): bit width `b` (1..28). Controls bucket count `2^b` and output names.
 - `--suffix`: build suffix fingerprints instead of prefix fingerprints.
 
 ### readable.py
@@ -48,11 +48,11 @@ python bench.py --bits 8 --suffix
 - `--suffix`: interpret boundaries as suffix fingerprints.
 
 ### measure_pruning.py
-- `--bits` (int, default 8): reads `title_strs_{prefix|suffix}_b{b}.parquet` and `q{b}_{prefix|suffix}_boundaries.npy`.
+- `--bits` (int, default 8): reads `title_strs_{prefix|suffix}_b{b}.parquet` and `q{b}_{prefix|suffix}_boundaries.npy` when `b <= 16`.
 - `--suffix`: estimate pruning for suffix queries.
 
 ### bench.py
-- `--bits` (int, default 8): input files and column names for bit width `b`.
+- `--bits` (int, default 8): input files and column names for bit width `b` (1..28).
 - `--warmup` (int, default 1): warmup runs per query (discarded).
 - `--reps` (int, default 10): timed runs per query after warmup.
 - `--csv` (string, default empty): write per-run timings to a CSV file.
@@ -61,6 +61,8 @@ python bench.py --bits 8 --suffix
 - `--profile-dir` (string, default empty): write JSON query profiles (and a summary CSV) to this directory.
 - `--profile-shell`: use the duckdb shell to generate per-query JSON profiles.
 - `--duckdb-bin` (string, default `duckdb`): path to duckdb CLI (used with `--profile-shell`).
+- `--parquet-path` (string, default empty): override parquet path (supports `{bits}` and `{mode}`).
+- `--force-uncompressed-table`: force uncompressed storage for CTAS tables (disables FSST-style compression).
 
 ### summarize_bench.py
 - `--csv` (string, required): input CSV from `bench.py`.
