@@ -263,8 +263,6 @@ def main(argv=None, default_suffix=False):
     con.execute("PRAGMA enable_object_cache=true")
 
     queries = ["jos", "2012", "the", "a", "(", "#", "interest"]
-    if args.suffix:
-        queries = [q[::-1] for q in queries]
 
     csv_rows = [] if args.csv else None
     profile_rows = [] if args.profile_dir else None

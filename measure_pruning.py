@@ -69,8 +69,6 @@ def main():
     n = len(df)
 
     queries = ["jos", "2012", "the", "a", "(", "#", "interest"]
-    if args.suffix:
-        queries = [q[::-1] for q in queries]
     print(f"N={n:,}")
     for q in queries:
         lo, hi = bucket_range(q, boundaries, K, suffix=args.suffix)
