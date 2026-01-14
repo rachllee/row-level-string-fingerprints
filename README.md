@@ -37,6 +37,13 @@ python measure_pruning.py --bits 8 --suffix
 python bench.py --bits 8 --suffix
 ```
 
+## Shell scripts
+Simple wrappers for running the full pipeline:
+
+- `bash all.sh`: prefix fingerprints for bits 1..28 (build, bench, summarize, plot).
+- `bash all_suffix.sh`: suffix fingerprints for bits 1..28 (build, bench, summarize, plot).
+- `bash all_uncompressed.sh`: prefix fingerprints using uncompressed Parquet + uncompressed tables.
+
 ## Script arguments
 
 ### build.py
