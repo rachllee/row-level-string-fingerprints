@@ -2,7 +2,7 @@ import argparse
 import numpy as np
 import pandas as pd
 
-IN_PARQUET  = "title_strs.parquet"
+IN_PARQUET = "title_strs.parquet"
 OUT_PARQUET = "title_strs_prefix.parquet"  # will be overridden to include bits
 
 COL = "title"
@@ -20,12 +20,7 @@ def dump_boundaries_txt(boundaries, path="prefix_boundaries.txt"):
 
 
 def dump_bucket_stats(df, col, path="prefix_bucket_stats.csv"):
-    stats = (
-        df[col]
-        .value_counts()
-        .sort_index()
-        .reset_index()
-    )
+    stats = df[col].value_counts().sort_index().reset_index()
     stats.columns = ["bucket_id", "row_count"]
     stats.to_csv(path, index=False)
 
@@ -39,8 +34,13 @@ def normalize(s: str) -> str:
     return (s or "").lower()
 
 
-def prefix_key_bytes(s: str, nbytes: int) -> bytes:
-    b = normalize(s).encode("utf-8", errors="ignore")[:nbytes]
+def normalize_query(s: str, suffix: bool) -> str:
+    s = normalize(s)
+    return s[::-1] if suffix else s
+
+
+def key_bytes(s_norm: str, nbytes: int) -> bytes:
+    b = s_norm.encode("utf-8", errors="ignore")[:nbytes]
     if len(b) < nbytes:
         b = b + b"\x00" * (nbytes - len(b))
     return b
@@ -50,9 +50,9 @@ def bytes_to_u64(b: bytes) -> np.uint64:
     return np.uint64(int.from_bytes(b, byteorder="big", signed=False))
 
 
-def make_keys(series: pd.Series, nbytes: int) -> np.ndarray:
+def make_keys(series: pd.Series, nbytes: int, suffix: bool) -> np.ndarray:
     return np.fromiter(
-        (bytes_to_u64(prefix_key_bytes(x, nbytes)) for x in series.astype("string")),
+        (bytes_to_u64(key_bytes(normalize_query(x, suffix), nbytes)) for x in series.astype("string")),
         dtype=np.uint64,
         count=len(series),
     )
@@ -71,27 +71,37 @@ def assign_codes(all_keys: np.ndarray, boundaries: np.ndarray, bits: int) -> np.
 
     if bits <= 8:
         return idx.astype(np.uint8)
-    else:
+    if bits <= 16:
         return idx.astype(np.uint16)
+    if bits <= 32:
+        return idx.astype(np.uint32)
+    return idx.astype(np.uint64)
 
 
-def main():
+def main(argv=None, default_suffix=False):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--bits", type=int, default=8, help="Bit width b (1..16). Default: 8")
-    args = parser.parse_args()
+    parser.add_argument("--bits", type=int, default=8, help="Bit width b (1..28). Default: 8")
+    parser.add_argument(
+        "--suffix",
+        action="store_true",
+        default=default_suffix,
+        help="Build suffix fingerprints instead of prefix fingerprints.",
+    )
+    args = parser.parse_args(argv)
 
     K = args.bits
-    if K < 1 or K > 16:
-        raise ValueError("--bits must be between 1 and 16")
+    if K < 1 or K > 28:
+        raise ValueError("--bits must be between 1 and 28")
 
     B = 1 << K
-    code_col = f"q{K}_prefix"
+    mode = "suffix" if args.suffix else "prefix"
+    code_col = f"q{K}_{mode}"
 
-    out_parquet = f"title_strs_prefix_b{K}.parquet"
+    out_parquet = f"title_strs_{mode}_b{K}.parquet"
     boundaries_npy = f"{code_col}_boundaries.npy"
     boundaries_txt = f"{code_col}_boundaries.txt"
     bucket_stats_csv = f"{code_col}_bucket_stats.csv"
-    samples_csv = f"title_prefix_samples_b{K}.csv"
+    samples_csv = f"title_{mode}_samples_b{K}.csv"
 
     print(f"Reading {IN_PARQUET} ...")
     df = pd.read_parquet(IN_PARQUET)
@@ -102,7 +112,7 @@ def main():
     n = len(df)
     print(f"Rows: {n:,}")
 
-    print(f"bits={K} -> buckets={B} -> column={code_col}")
+    print(f"mode={mode} bits={K} -> buckets={B} -> column={code_col}")
 
     if n > SAMPLE_SIZE:
         sample = df[COL].sample(n=SAMPLE_SIZE, random_state=SEED)
@@ -111,11 +121,11 @@ def main():
         sample = df[COL]
         print(f"Using all rows to estimate {B} boundaries...")
 
-    sample_keys = make_keys(sample, PREFIX_BYTES)
+    sample_keys = make_keys(sample, PREFIX_BYTES, suffix=args.suffix)
     boundaries = build_boundaries(sample_keys, B)
 
     print(f"Assigning {code_col} codes for all rows...")
-    all_keys = make_keys(df[COL], PREFIX_BYTES)
+    all_keys = make_keys(df[COL], PREFIX_BYTES, suffix=args.suffix)
     df[code_col] = assign_codes(all_keys, boundaries, K)
 
     np.save(boundaries_npy, boundaries)

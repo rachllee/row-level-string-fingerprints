@@ -97,7 +97,7 @@ def plot_time_by_query(df, out_dir):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--csv", default="bench_summary.csv", help="Input summary CSV")
-    parser.add_argument("--out-dir", default="bench_summary_plots", help="Output directory")
+    parser.add_argument("--out-dir", default="bench_summary_plots_16", help="Output directory")
     parser.add_argument("--table-png", default="bench_summary_table.png", help="PNG table output")
     args = parser.parse_args()
 
