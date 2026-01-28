@@ -95,13 +95,24 @@ def run_benchmark(
     profile_shell,
     duckdb_bin,
     force_uncompressed_table,
+    force_compression,
 ):
     con.execute("DROP VIEW IF EXISTS t")
     con.execute("DROP TABLE IF EXISTS t")
     if source_label == "table":
-        if force_uncompressed_table:
+        if force_compression:
+            con.execute(f"PRAGMA force_compression='{force_compression}'")
+        elif force_uncompressed_table:
             con.execute("PRAGMA force_compression='uncompressed'")
+        else:
+            con.execute("PRAGMA force_compression='auto'")
         con.execute(f"CREATE TABLE t AS SELECT * FROM read_parquet('{parquet}')")
+        info_rows = con.execute(
+            "SELECT column_name, segment_type, compression "
+            "FROM pragma_storage_info('t') "
+            f"WHERE column_name IN ('title', '{code_col}')"
+        ).fetchall()
+        print("[table] storage info:", info_rows)
     else:
         con.execute(f"CREATE VIEW t AS SELECT * FROM read_parquet('{parquet}')")
 
@@ -175,6 +186,7 @@ def run_benchmark(
                     q_full,
                     full_path,
                     force_uncompressed_table,
+                    force_compression,
                 )
                 rows_fp = run_profile_shell(
                     duckdb_bin,
@@ -183,6 +195,7 @@ def run_benchmark(
                     q_fp,
                     fp_path,
                     force_uncompressed_table,
+                    force_compression,
                 )
             else:
                 rows_full = None
@@ -242,6 +255,12 @@ def main(argv=None, default_suffix=False):
         action="store_true",
         help="Force uncompressed storage for CTAS tables (disables FSST-style compression).",
     )
+    parser.add_argument(
+        "--force-compression",
+        type=str,
+        default="",
+        help="Force a specific compression for CTAS tables (e.g., dict_fsst, fsst).",
+    )
     args = parser.parse_args(argv)
 
     K = args.bits
@@ -288,6 +307,7 @@ def main(argv=None, default_suffix=False):
         profile_shell=args.profile_shell,
         duckdb_bin=args.duckdb_bin,
         force_uncompressed_table=args.force_uncompressed_table,
+        force_compression=args.force_compression,
     )
     run_benchmark(
         con,
@@ -308,6 +328,7 @@ def main(argv=None, default_suffix=False):
         profile_shell=args.profile_shell,
         duckdb_bin=args.duckdb_bin,
         force_uncompressed_table=args.force_uncompressed_table,
+        force_compression=args.force_compression,
     )
 
     if args.csv and csv_rows is not None:
@@ -331,7 +352,13 @@ def sql_quote(s: str) -> str:
 
 
 def run_profile_shell(
-    duckdb_bin, parquet, source_label, sql, out_path, force_uncompressed_table
+    duckdb_bin,
+    parquet,
+    source_label,
+    sql,
+    out_path,
+    force_uncompressed_table,
+    force_compression,
 ):
     if not duckdb_bin:
         return None
@@ -341,13 +368,21 @@ def run_profile_shell(
     quoted_path = sql_quote(out_path)
     quoted_parquet = sql_quote(parquet)
     if source_label == "table":
-        if force_uncompressed_table:
+        if force_compression:
+            create_stmt = (
+                f"PRAGMA force_compression='{force_compression}';\n"
+                f"CREATE TABLE t AS SELECT * FROM read_parquet('{quoted_parquet}')"
+            )
+        elif force_uncompressed_table:
             create_stmt = (
                 "PRAGMA force_compression='uncompressed';\n"
                 f"CREATE TABLE t AS SELECT * FROM read_parquet('{quoted_parquet}')"
             )
         else:
-            create_stmt = f"CREATE TABLE t AS SELECT * FROM read_parquet('{quoted_parquet}')"
+            create_stmt = (
+                "PRAGMA force_compression='auto';\n"
+                f"CREATE TABLE t AS SELECT * FROM read_parquet('{quoted_parquet}')"
+            )
     else:
         create_stmt = f"CREATE VIEW t AS SELECT * FROM read_parquet('{quoted_parquet}')"
 

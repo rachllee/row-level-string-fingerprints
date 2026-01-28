@@ -70,6 +70,7 @@ Simple wrappers for running the full pipeline:
 - `--duckdb-bin` (string, default `duckdb`): path to duckdb CLI (used with `--profile-shell`).
 - `--parquet-path` (string, default empty): override parquet path (supports `{bits}` and `{mode}`).
 - `--force-uncompressed-table`: force uncompressed storage for CTAS tables (disables FSST-style compression).
+- `--force-compression` (string, default empty): force a specific compression for CTAS tables (e.g., `dict_fsst`, `fsst`).
 
 ### summarize_bench.py
 - `--csv` (string, required): input CSV from `bench.py`.

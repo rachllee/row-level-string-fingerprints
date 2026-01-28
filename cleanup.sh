@@ -14,4 +14,8 @@ rm -f q*_suffix_bucket_stats.csv
 rm -f title_suffix_samples_b*.csv
 rm -f title_strs_suffix_b*.parquet
 
+if command -v duckdb >/dev/null 2>&1; then
+  duckdb -c "DROP TABLE IF EXISTS t;"
+fi
+
 echo "removed files"
