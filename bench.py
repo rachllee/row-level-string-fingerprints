@@ -107,12 +107,7 @@ def run_benchmark(
         else:
             con.execute("PRAGMA force_compression='auto'")
         con.execute(f"CREATE TABLE t AS SELECT * FROM read_parquet('{parquet}')")
-        info_rows = con.execute(
-            "SELECT column_name, segment_type, compression "
-            "FROM pragma_storage_info('t') "
-            f"WHERE column_name IN ('title', '{code_col}')"
-        ).fetchall()
-        print("[table] storage info:", info_rows)
+        # Table storage info is not printed by default to keep output clean.
     else:
         con.execute(f"CREATE VIEW t AS SELECT * FROM read_parquet('{parquet}')")
 
