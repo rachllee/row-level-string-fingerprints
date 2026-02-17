@@ -2,7 +2,8 @@ import argparse
 import numpy as np
 import pandas as pd
 
-IN_PARQUET = "title_strs.parquet"
+# Default input, can be overridden with --input
+DEFAULT_IN_PARQUET = "title_strs.parquet"
 OUT_PARQUET = "title_strs_prefix.parquet"  # will be overridden to include bits
 
 COL = "title"
@@ -87,6 +88,12 @@ def main(argv=None, default_suffix=False):
         default=default_suffix,
         help="Build suffix fingerprints instead of prefix fingerprints.",
     )
+    parser.add_argument(
+        "--input",
+        type=str,
+        default=DEFAULT_IN_PARQUET,
+        help=f"Input parquet file. Default: {DEFAULT_IN_PARQUET}",
+    )
     args = parser.parse_args(argv)
 
     K = args.bits
@@ -103,8 +110,8 @@ def main(argv=None, default_suffix=False):
     bucket_stats_csv = f"{code_col}_bucket_stats.csv"
     samples_csv = f"title_{mode}_samples_b{K}.csv"
 
-    print(f"Reading {IN_PARQUET} ...")
-    df = pd.read_parquet(IN_PARQUET)
+    print(f"Reading {args.input} ...")
+    df = pd.read_parquet(args.input)
 
     if COL not in df.columns:
         raise ValueError(f"Expected column '{COL}'. Found: {list(df.columns)}")
