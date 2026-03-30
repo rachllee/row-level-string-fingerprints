@@ -1,0 +1,38 @@
+# Generated fingerprint parquets (rebuilt by build.py / build_infix.py)
+title_strs_prefix_b*.parquet
+title_strs_suffix_b*.parquet
+title_strs_infix_p*.parquet
+title_strs_infix16_p*.parquet
+
+# Boundary files (rebuilt by build scripts)
+q*_prefix_boundaries.npy
+q*_prefix_boundaries.txt
+q*_suffix_boundaries.npy
+q*_suffix_boundaries.txt
+
+# Bucket stats and sample files (rebuilt by build scripts)
+q*_prefix_bucket_stats.csv
+q*_suffix_bucket_stats.csv
+title_prefix_samples_b*.csv
+title_suffix_samples_b*.csv
+
+# Benchmark result CSVs (rebuilt by bench scripts)
+all_prefixes_*.csv
+all_suffixes_*.csv
+all_real_infix_*.csv
+all_infix_*.csv
+stratified_infix_*.csv
+sixway_*.csv
+compare_infix_*.csv
+sampled_infix_*.csv
+
+# Plot output directories
+*_plots*/
+sixway_plots/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store

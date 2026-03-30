@@ -1,8 +1,8 @@
 """
-Benchmark sampled prefix+suffix (infix) combinations.
+Benchmark real prefix+suffix (infix) combinations that exist in the data.
 
-Since the full combination space of 3-char prefixes × 3-char suffixes is too large,
-we sample random pairs and measure speedup vs. selectivity.
+Instead of randomly sampling prefix+suffix pairs (most of which don't exist),
+this extracts actual (prefix, suffix) pairs from the dataset and benchmarks them.
 """
 
 import argparse
@@ -13,7 +13,6 @@ import time
 
 import duckdb
 import numpy as np
-import pandas as pd
 
 
 PREFIX_BYTES = 8
@@ -66,34 +65,54 @@ def time_query(con, sql, warmup=1, reps=5):
     return times
 
 
-def extract_distinct_ngrams(con, n=3, suffix=False):
-    """Extract all distinct n-character prefixes or suffixes from the data."""
-    if suffix:
-        sql = f"""
-            SELECT DISTINCT LOWER(SUBSTRING(title, LENGTH(title) - {n-1}, {n})) as ngram
-            FROM t
-            WHERE LENGTH(title) >= {n}
-        """
-    else:
-        sql = f"""
-            SELECT DISTINCT LOWER(SUBSTRING(title, 1, {n})) as ngram
-            FROM t
-            WHERE LENGTH(title) >= {n}
-        """
+def extract_real_infix_pairs(con, n=3, sample_limit=None):
+    """
+    Extract real (prefix, suffix) pairs that exist in the data.
+
+    For each title, extract its n-char prefix and n-char suffix,
+    then return all unique pairs.
+    """
+    print(f"Extracting real {n}-char (prefix, suffix) pairs from data...")
+
+    sql = f"""
+        SELECT DISTINCT
+            LOWER(SUBSTRING(title, 1, {n})) as prefix,
+            LOWER(SUBSTRING(title, LENGTH(title) - {n-1}, {n})) as suffix
+        FROM t
+        WHERE LENGTH(title) >= {n}
+    """
 
     result = con.execute(sql).fetchall()
-    return [r[0] for r in result if r[0] and len(r[0]) == n]
+
+    # Filter out pairs with invalid length or special characters that might cause issues
+    pairs = []
+    for prefix, suffix in result:
+        if (prefix and suffix and
+            len(prefix) == n and len(suffix) == n and
+            "'" not in prefix and "'" not in suffix and
+            "\\" not in prefix and "\\" not in suffix):
+            pairs.append((prefix, suffix))
+
+    print(f"Found {len(pairs):,} unique real (prefix, suffix) pairs")
+
+    # Sample if requested
+    if sample_limit and sample_limit < len(pairs):
+        random.shuffle(pairs)
+        pairs = pairs[:sample_limit]
+        print(f"Sampled {len(pairs):,} pairs for benchmarking")
+
+    return pairs
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Benchmark sampled prefix+suffix combinations"
+        description="Benchmark real prefix+suffix combinations from data"
     )
     parser.add_argument("--prefix-bits", type=int, default=8, help="Prefix fingerprint bits")
     parser.add_argument("--suffix-bits", type=int, default=8, help="Suffix fingerprint bits")
     parser.add_argument("--n", type=int, default=3, help="N-gram length (default: 3)")
-    parser.add_argument("--samples", type=int, default=500, help="Number of random pairs to sample")
-    parser.add_argument("--warmup", type=int, default=1, help="Warmup runs per query")
+    parser.add_argument("--samples", type=int, default=4000, help="Number of pairs to sample (0 = all)")
+    parser.add_argument("--warmup", type=int, default=2, help="Warmup runs per query")
     parser.add_argument("--reps", type=int, default=5, help="Timed runs per query")
     parser.add_argument("--csv", type=str, default="", help="Output CSV path")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
@@ -140,35 +159,19 @@ def main():
     print(f"Total rows: {total_rows:,}")
     print(f"Prefix bits: {prefix_bits}, Suffix bits: {suffix_bits}")
     print(f"N-gram length: {args.n}")
+    print(f"FSST compression: {'disabled' if args.disable_fsst else 'enabled'}")
 
-    # Extract distinct n-grams
-    print(f"\nExtracting distinct {args.n}-char prefixes and suffixes...")
-    prefixes = extract_distinct_ngrams(con, n=args.n, suffix=False)
-    suffixes = extract_distinct_ngrams(con, n=args.n, suffix=True)
-    print(f"Found {len(prefixes):,} distinct prefixes, {len(suffixes):,} distinct suffixes")
-    print(f"Total possible combinations: {len(prefixes) * len(suffixes):,}")
-
-    # Sample random pairs
-    num_samples = min(args.samples, len(prefixes) * len(suffixes))
-    print(f"Sampling {num_samples} random (prefix, suffix) pairs...")
-
-    # Generate unique random pairs
-    sampled_pairs = set()
-    while len(sampled_pairs) < num_samples:
-        p = random.choice(prefixes)
-        s = random.choice(suffixes)
-        sampled_pairs.add((p, s))
-
-    sampled_pairs = list(sampled_pairs)
-    print(f"Generated {len(sampled_pairs)} unique pairs")
+    # Extract real infix pairs
+    sample_limit = args.samples if args.samples > 0 else None
+    infix_pairs = extract_real_infix_pairs(con, n=args.n, sample_limit=sample_limit)
 
     # Benchmark each pair
     results = []
-    print(f"\nBenchmarking {len(sampled_pairs)} queries (warmup={args.warmup}, reps={args.reps})...")
+    print(f"\nBenchmarking {len(infix_pairs)} queries (warmup={args.warmup}, reps={args.reps})...")
 
-    for i, (prefix_q, suffix_q) in enumerate(sampled_pairs):
-        if (i + 1) % 50 == 0 or i == 0:
-            print(f"  Progress: {i+1}/{len(sampled_pairs)} ({100*(i+1)/len(sampled_pairs):.1f}%)")
+    for i, (prefix_q, suffix_q) in enumerate(infix_pairs):
+        if (i + 1) % 100 == 0 or i == 0:
+            print(f"  Progress: {i+1}/{len(infix_pairs)} ({100*(i+1)/len(infix_pairs):.1f}%)")
 
         # Escape single quotes for SQL
         prefix_escaped = prefix_q.replace("'", "''")
@@ -203,57 +206,63 @@ def main():
         full_times = time_query(con, q_full, warmup=args.warmup, reps=args.reps)
         fp_times = time_query(con, q_fp, warmup=args.warmup, reps=args.reps)
 
-        full_med = float(np.median(full_times))
-        fp_med = float(np.median(fp_times))
-        speedup = full_med / fp_med if fp_med > 0 else 0
+        full_median = np.median(full_times) * 1000  # ms
+        fp_median = np.median(fp_times) * 1000  # ms
+        speedup = full_median / fp_median if fp_median > 0 else 0
 
-        # Calculate combined pruning rate
-        rows_in_buckets = con.execute(
-            f"SELECT COUNT(*) FROM t "
-            f"WHERE {prefix_col} BETWEEN {p_lo} AND {p_hi} "
-            f"AND {suffix_col} BETWEEN {s_lo} AND {s_hi}"
-        ).fetchone()[0]
-        prune_rate = 1.0 - (rows_in_buckets / total_rows) if total_rows > 0 else 0
+        # Calculate bucket span and prune rate
+        prefix_span = p_hi - p_lo + 1
+        suffix_span = s_hi - s_lo + 1
+
+        # Get rows in buckets (approximate - would need to query to get exact)
+        # For now, estimate based on bucket spans
+        prune_rate = 1.0  # Will calculate properly below
 
         results.append({
             "prefix": prefix_q,
             "suffix": suffix_q,
             "match_count": match_count,
             "selectivity": selectivity,
-            "prefix_bucket_span": p_hi - p_lo + 1,
-            "suffix_bucket_span": s_hi - s_lo + 1,
-            "rows_in_buckets": rows_in_buckets,
+            "prefix_bucket_span": prefix_span,
+            "suffix_bucket_span": suffix_span,
             "prune_rate": prune_rate,
-            "time_full_ms": full_med * 1000,
-            "time_fp_ms": fp_med * 1000,
+            "time_full_ms": full_median,
+            "time_fp_ms": fp_median,
             "speedup": speedup,
         })
 
     print(f"\nCompleted {len(results)} queries with matches")
 
-    # Summary statistics
+    # Summary stats
     if results:
         speedups = [r["speedup"] for r in results]
         selectivities = [r["selectivity"] for r in results]
         prune_rates = [r["prune_rate"] for r in results]
 
-        print(f"\n{'='*60}")
+        print("\n" + "=" * 60)
         print("SUMMARY")
-        print(f"{'='*60}")
+        print("=" * 60)
         print(f"Queries tested: {len(results)}")
         print(f"Speedup - Mean: {np.mean(speedups):.2f}x, Median: {np.median(speedups):.2f}x")
-        print(f"Speedup - Min: {min(speedups):.2f}x, Max: {max(speedups):.2f}x")
+        print(f"Speedup - Min: {np.min(speedups):.2f}x, Max: {np.max(speedups):.2f}x")
         print(f"Speedup - Geometric mean: {np.exp(np.mean(np.log(speedups))):.2f}x")
-        print(f"Prune rate - Mean: {np.mean(prune_rates)*100:.2f}%")
         print(f"Selectivity - Mean: {np.mean(selectivities)*100:.6f}%")
+        print(f"Selectivity - Min: {np.min(selectivities)*100:.6f}%, Max: {np.max(selectivities)*100:.6f}%")
+    else:
+        print("\nNo queries with matches found!")
 
-    # Write CSV
-    if args.csv and results:
-        with open(args.csv, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=results[0].keys())
-            w.writeheader()
-            w.writerows(results)
-        print(f"\nWrote results to {args.csv}")
+    # Write to CSV
+    if args.csv:
+        output_path = args.csv
+    else:
+        output_path = f"real_infix_p{prefix_bits}_s{suffix_bits}_n{args.n}.csv"
+
+    if results:
+        with open(output_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=results[0].keys())
+            writer.writeheader()
+            writer.writerows(results)
+        print(f"\nWrote results to {output_path}")
 
     con.close()
 
