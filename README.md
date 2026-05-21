@@ -1,6 +1,8 @@
 # row-level-string-fingerprints
 
-Prototype for building a prefix- or suffix-based "fingerprint" column on string data, then using it to prune prefix queries (e.g., `LIKE 'foo%'`) or suffix queries (e.g., `LIKE '%foo'`).
+Prototype for building fingerprint columns on string data to accelerate string predicate queries. Covers three query types:
+- **Prefix** queries (`LIKE 'foo%'`) and **suffix** queries (`LIKE '%foo'`) via quantile bucket codes with zone map pruning
+- **Substring** queries (`LIKE '%foo%'`) via 16-bit character presence bitmask with Arrow-compute row-level filtering
 
 ## Files and outputs
 - Input: `title_strs.parquet` (expects a `title` column)
@@ -88,3 +90,72 @@ Simple wrappers for running the full pipeline:
 - `--suffix`: analyze suffix fingerprints.
 - `--queries` (string, default empty): comma-separated queries (without `%`).
 - `--csv` (string, default empty): append results to a CSV file.
+
+---
+
+## Substring fingerprint (16-bit character bitmask)
+
+Bit `i` of `fp16_chars` = 1 if the string contains `selected_features[i]`. Features are chosen via decision tree induction to maximize entropy. At query time, a pattern mask is computed from the query string and used to filter rows before substring evaluation.
+
+### Quick start
+
+```bash
+# 1. Build fingerprint parquet (unigrams, recommended)
+python build_substr.py --ngram 1 --bits 16
+
+# 2. Run custom Arrow-compute scanner on a few patterns
+python custom_scan.py --patterns "ing" "python" "the" "2024"
+
+# 3. Benchmark across 600 sampled patterns and generate plots
+python bench_custom_scan.py --samples 100 --lengths 3 4 5 6 8 10 --reps 3
+# → writes custom_scan_bench.csv and custom_scan_plots/
+```
+
+### Unigram vs bigram comparison
+
+```bash
+# Build and benchmark with unigrams
+python build_substr.py --ngram 1
+python bench_custom_scan.py --csv custom_scan_bench.csv --out-dir custom_scan_plots
+
+# Build and benchmark with bigrams
+python build_substr.py --ngram 2
+python bench_custom_scan.py --csv custom_scan_bench_bigram.csv --out-dir custom_scan_plots_bigram
+
+# Side-by-side comparison plot → custom_scan_plots/unigram_vs_bigram.png
+python plot_comparison.py
+```
+
+### DuckDB bitmask benchmark (for reference)
+
+```bash
+python bench_substr.py --samples 300 --lengths 3 4 5 6 8 10
+```
+Note: DuckDB does not evaluate the bitmask filter before ILIKE, so speedup is ~1.0x regardless of selectivity.
+
+### Row-group skipping test
+
+```bash
+python repartition_parquet.py
+```
+Repartitions the parquet into row groups of 10k / 50k / 122k / 500k rows and measures what fraction of row groups can be skipped. With character-level features at ~50% frequency, skipping is 0% at all sizes.
+
+### Script arguments
+
+#### build_substr.py
+- `--bits` (int, default 16): number of fingerprint bits / features selected.
+- `--sample` (int, default 200000): rows sampled for feature selection.
+- `--ngram` (int, default 2): n-gram size — 1 for characters, 2 for bigrams.
+- `--max-freq` (float, default 0.01): maximum feature frequency; use 1.0 to allow all frequencies and let entropy selection decide.
+
+#### custom_scan.py
+- `--patterns` (list, default several examples): substring patterns to test.
+- `--reps` (int, default 3): timed repetitions per pattern.
+
+#### bench_custom_scan.py
+- `--samples` (int, default 100): patterns sampled per length.
+- `--lengths` (list, default 3 4 5 6 8 10): pattern lengths to test.
+- `--reps` (int, default 3): timed repetitions per pattern.
+- `--csv` (string, default `custom_scan_bench.csv`): output CSV path.
+- `--out-dir` (string, default `custom_scan_plots`): output directory for plots.
+- `--seed` (int, default 42): random seed for pattern sampling.

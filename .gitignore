@@ -30,6 +30,13 @@ sampled_infix_*.csv
 *_plots*/
 sixway_plots/
 
+# Substring fingerprint generated files (rebuilt by build_substr.py / bench_custom_scan.py)
+title_strs_substr_fp16.parquet
+title_strs_substr_rg*.parquet
+substr_features.json
+substr_fp16.csv
+custom_scan_bench*.csv
+
 # Python cache
 __pycache__/
 *.pyc
